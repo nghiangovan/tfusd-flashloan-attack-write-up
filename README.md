@@ -1,4 +1,4 @@
-# tfusd-flashloan-attack-write-up
+# tfusd-flashloan-exploit
 
 The vulnerable contract [tfUSD](https://etherscan.io/address/0xa1e72267084192Db7387c8CC1328fadE470e4149) owned 50M tusd at the time the issue was reported.
 
