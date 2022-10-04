@@ -108,12 +108,12 @@ contract Flashloan is FlashLoanReceiverBase {
         modes[1] = 0;
         LENDING_POOL.flashLoan(
             address(this), // - receiverAddress:    Địa chỉ nhận assets
-            assets, // - assets:             Các loại tài sản muốn vay
-            amounts, // - amounts:            Số lượng vay của từng tài sản
-            modes, // - modes:              Chế độ vay của từng tài sản
+            assets,        // - assets:             Các loại tài sản muốn vay
+            amounts,       // - amounts:            Số lượng vay của từng tài sản
+            modes,         // - modes:              Chế độ vay của từng tài sản
             address(this), // - onBehalfOf:         Người chịu khoản nợ
-            "", // - params:             Các tham số sđược mã hóa dạng bytes-encoded để truyền vào thực thi trong hàm executeOperation() nếu có
-            0 // - referralCode:       Mã giới thiệu thường sử dụng cho bên thứ 3 nếu có
+            "",            // - params:             Các tham số sđược mã hóa dạng bytes-encoded để truyền vào thực thi trong hàm executeOperation() nếu có
+            0              // - referralCode:       Mã giới thiệu thường sử dụng cho bên thứ 3 nếu có
         );
     }
 
